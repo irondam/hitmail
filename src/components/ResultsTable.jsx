@@ -36,10 +36,10 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
     return emailCols.some((ci) => r.emailResults[ci]?.status === filter)
   }).slice(0, PAGE)
 
-  // Colonnes à afficher : originales + colonnes CP ajoutées (dept, region)
   const extraHeaders = cpCols.flatMap((ci) => [
-    `Département`,
-    `DT`,
+    `Codes_Départements`,
+    `Départements`,
+    `Directions territoriales`,
   ])
 
   const filterBtn = (f, label, count, color) => (
@@ -144,12 +144,15 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
                   return <td key={ci} style={td()}>{r.original[ci] ?? ''}</td>
                 })}
                 {cpCols.flatMap((ci) => {
-                  const info = r.cpInfo?.[ci] || {}
-                  return [
-                    <td key={`dept-${ci}`} style={td()}>{info.dept || <span style={{ color: '#bbb' }}>—</span>}</td>,
-                    <td key={`region-${ci}`} style={td()}>{info.region || <span style={{ color: '#bbb' }}>—</span>}</td>,
-                  ]
-                })}
+                const info = r.cpInfo?.[ci] || {}
+                return [
+                  <td key={`dept-${ci}`}>{info.dept || '—'}</td>,
+                  <td key={`departement-${ci}`}>{info.departement || '—'}</td>,
+                  <td key={`dt-${ci}`} style={{ color: info.dt ? '#185FA5' : '#bbb' }}>
+                    {info.dt || '—'}
+                  </td>,
+                ]
+              })}
               </tr>
             ))}
             {rows.length > PAGE && (

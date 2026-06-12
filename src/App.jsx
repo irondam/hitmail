@@ -51,14 +51,15 @@ export default function App() {
 
   const downloadResult = () => {
     const extraHeaders = cpCols.flatMap((ci) => [
-      `Département`,
-      `DT`,
+      `Codes_départements`,
+      `Départements`,
+      `Directions territoriales`,
     ])
     const outputHeaders = [...headers, ...extraHeaders]
     const outputRows = results.map((r) => {
       const extra = cpCols.flatMap((ci) => {
         const info = r.cpInfo?.[ci] || {}
-        return [info.dept || '', info.region || '']
+        return [info.dept || '', info.departement || '', info.dt || '']
       })
       return [...r.cleanedRow, ...extra]
     })
