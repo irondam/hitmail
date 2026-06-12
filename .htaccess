@@ -1,8 +1,20 @@
+<IfModule mod_headers.c>
+  <FilesMatch "\.js$">
+    Header set Content-Type "application/javascript"
+  </FilesMatch>
+  <FilesMatch "\.css$">
+    Header set Content-Type "text/css"
+  </FilesMatch>
+  <FilesMatch "\.svg$">
+    Header set Content-Type "image/svg+xml"
+  </FilesMatch>
+</IfModule>
+
 AddType application/javascript .js
+AddType application/javascript .mjs
 AddType text/css .css
 AddType image/svg+xml .svg
 
-# SPA fallback : redirige tout vers index.html
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /hitmail/
