@@ -4,7 +4,7 @@ import DropZone from './components/DropZone'
 import ColumnSelector from './components/ColumnSelector'
 import ResultsTable from './components/ResultsTable'
 import { getContactFromCP } from './data/regions'
-import { cleanEmail, detectEmailColumns, detectCPColumns, deduplicateRows } from './utils/emailCleaner'
+import { cleanEmail, detectEmailColumns, detectCPColumns, deduplicateRows, parseCSV } from './utils/emailCleaner'
 
 const STEPS = { UPLOAD: 0, CONFIG: 1, RESULTS: 2 }
 
@@ -20,20 +20,48 @@ export default function App() {
 
   const handleFile = (file) => {
     setFileName(file.name)
+    const isCSV = file.name.toLowerCase().endsWith('.csv')
     const reader = new FileReader()
-    reader.onload = (e) => {
-      const wb = XLSX.read(e.target.result, { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
-      const hdrs = data[0] || []
-      const rows = data.slice(1)
-      setHeaders(hdrs)
-      setRawRows(rows)
-      setEmailCols(detectEmailColumns(hdrs))
-      setCPCols(detectCPColumns(hdrs))
-      setStep(STEPS.CONFIG)
+
+    if (isCSV) {
+      reader.onload = (e) => {
+        const rows = parseCSV(e.target.result)
+        const hdrs = rows[0] || []
+        setHeaders(hdrs)
+        setRawRows(rows.slice(1))
+        setEmailCols(detectEmailColumns(hdrs))
+        setCPCols(detectCPColumns(hdrs))
+        setStep(STEPS.CONFIG)
+      }
+      // Tentative UTF-8 d'abord, fallback ISO-8859-1 (exports FR courants)
+      reader.onerror = () => {
+        const r2 = new FileReader()
+        r2.onload = (e) => {
+          const rows = parseCSV(e.target.result)
+          const hdrs = rows[0] || []
+          setHeaders(hdrs)
+          setRawRows(rows.slice(1))
+          setEmailCols(detectEmailColumns(hdrs))
+          setCPCols(detectCPColumns(hdrs))
+          setStep(STEPS.CONFIG)
+        }
+        r2.readAsText(file, 'ISO-8859-1')
+      }
+      reader.readAsText(file, 'UTF-8')
+    } else {
+      reader.onload = (e) => {
+        const wb = XLSX.read(e.target.result, { type: 'array' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+        const hdrs = data[0] || []
+        setHeaders(hdrs)
+        setRawRows(data.slice(1))
+        setEmailCols(detectEmailColumns(hdrs))
+        setCPCols(detectCPColumns(hdrs))
+        setStep(STEPS.CONFIG)
+      }
+      reader.readAsArrayBuffer(file)
     }
-    reader.readAsArrayBuffer(file)
   }
 
   const runClean = () => {
@@ -53,10 +81,10 @@ export default function App() {
   }
 
   const downloadResult = () => {
-    const extraHeaders = cpCols.flatMap((ci) => [
-      `Codes_départements`,
-      `Départements`,
-      `Directions territoriales`,
+    const extraHeaders = cpCols.flatMap(() => [
+      'Codes_départements',
+      'Départements',
+      'Directions territoriales',
     ])
     const outputHeaders = [...headers, ...extraHeaders]
     const outputRows = results.map((r) => {
@@ -69,7 +97,7 @@ export default function App() {
     const ws = XLSX.utils.aoa_to_sheet([outputHeaders, ...outputRows])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Nettoyé')
-    XLSX.writeFile(wb, fileName.replace(/\.xlsx?$/i, '') + '_nettoye.xlsx')
+    XLSX.writeFile(wb, fileName.replace(/\.(xlsx?|csv)$/i, '') + '_nettoye.xlsx')
   }
 
   return (
@@ -107,16 +135,16 @@ export default function App() {
             </span>
             <button onClick={() => setStep(STEPS.CONFIG)} style={secondaryBtn}>← Modifier les colonnes</button>
           </div>
-            <ResultsTable
-                headers={headers}
-                rows={results}
-                emailCols={emailCols}
-                cpCols={cpCols}
-                dupRemoved={dupRemoved}
-                onDownload={downloadResult}
-              />        
-          </div>
-        )}
+          <ResultsTable
+            headers={headers}
+            rows={results}
+            emailCols={emailCols}
+            cpCols={cpCols}
+            dupRemoved={dupRemoved}
+            onDownload={downloadResult}
+          />
+        </div>
+      )}
     </div>
   )
 }
