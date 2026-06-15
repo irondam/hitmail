@@ -170,3 +170,47 @@ export function deduplicateRows(cleanedRows, emailCols) {
 
   return { deduped, duplicatesRemoved };
 }
+
+// ─── Détection d'encodage et décodage ───────────────────────────────────────
+
+/**
+ * Prend un ArrayBuffer (fichier CSV lu en binaire) et retourne une string UTF-8.
+ * Détection dans l'ordre :
+ *   1. BOM UTF-8 (EF BB BF) → UTF-8
+ *   2. BOM UTF-16 LE/BE     → UTF-16
+ *   3. Heuristique : si le buffer contient des séquences UTF-8 valides → UTF-8
+ *   4. Sinon → Windows-1252 (encodage par défaut des exports Excel FR/EU)
+ *
+ * Windows-1252 est préféré à ISO-8859-1 car il couvre en plus :
+ *   €, guillemets typographiques " " ' ', tirets –, —, etc.
+ */
+export function decodeBuffer(buffer) {
+  const bytes = new Uint8Array(buffer)
+
+  // 1. BOM UTF-8
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return new TextDecoder('utf-8').decode(buffer)
+  }
+
+  // 2. BOM UTF-16 LE
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+    return new TextDecoder('utf-16le').decode(buffer)
+  }
+
+  // 3. BOM UTF-16 BE
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+    return new TextDecoder('utf-16be').decode(buffer)
+  }
+
+  // 4. Heuristique UTF-8 : on tente de décoder et on vérifie l'absence d'erreurs
+  //    TextDecoder en mode fatal lève une exception si le buffer n'est pas UTF-8 valide
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+    return text
+  } catch (_) {
+    // Pas du UTF-8 valide → on tombe sur Windows-1252
+  }
+
+  // 5. Windows-1252 (couvre ISO-8859-1 + caractères typographiques FR courants)
+  return new TextDecoder('windows-1252').decode(buffer)
+}

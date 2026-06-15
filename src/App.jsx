@@ -4,7 +4,7 @@ import DropZone from './components/DropZone'
 import ColumnSelector from './components/ColumnSelector'
 import ResultsTable from './components/ResultsTable'
 import { getContactFromCP } from './data/regions'
-import { cleanEmail, detectEmailColumns, detectCPColumns, deduplicateRows, parseCSV } from './utils/emailCleaner'
+import { cleanEmail, detectEmailColumns, detectCPColumns, deduplicateRows, parseCSV, decodeBuffer } from './utils/emailCleaner'
 
 const STEPS = { UPLOAD: 0, CONFIG: 1, RESULTS: 2 }
 
@@ -24,8 +24,11 @@ export default function App() {
     const reader = new FileReader()
 
     if (isCSV) {
+      // Lire en binaire pour détecter et convertir l'encodage correctement
       reader.onload = (e) => {
-        const rows = parseCSV(e.target.result)
+        const buffer = e.target.result
+        const text = decodeBuffer(buffer)
+        const rows = parseCSV(text)
         const hdrs = rows[0] || []
         setHeaders(hdrs)
         setRawRows(rows.slice(1))
@@ -33,22 +36,9 @@ export default function App() {
         setCPCols(detectCPColumns(hdrs))
         setStep(STEPS.CONFIG)
       }
-      // Tentative UTF-8 d'abord, fallback ISO-8859-1 (exports FR courants)
-      reader.onerror = () => {
-        const r2 = new FileReader()
-        r2.onload = (e) => {
-          const rows = parseCSV(e.target.result)
-          const hdrs = rows[0] || []
-          setHeaders(hdrs)
-          setRawRows(rows.slice(1))
-          setEmailCols(detectEmailColumns(hdrs))
-          setCPCols(detectCPColumns(hdrs))
-          setStep(STEPS.CONFIG)
-        }
-        r2.readAsText(file, 'ISO-8859-1')
-      }
-      reader.readAsText(file, 'UTF-8')
+      reader.readAsArrayBuffer(file)
     } else {
+      // XLSX : XLSX.read gère lui-même l'encodage
       reader.onload = (e) => {
         const wb = XLSX.read(e.target.result, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
