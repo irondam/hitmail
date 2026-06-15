@@ -3,8 +3,8 @@ import * as XLSX from 'xlsx'
 import DropZone from './components/DropZone'
 import ColumnSelector from './components/ColumnSelector'
 import ResultsTable from './components/ResultsTable'
-import { cleanEmail, detectEmailColumns, detectCPColumns } from './utils/emailCleaner'
 import { getContactFromCP } from './data/regions'
+import { cleanEmail, detectEmailColumns, detectCPColumns, deduplicateRows } from './utils/emailCleaner'
 
 const STEPS = { UPLOAD: 0, CONFIG: 1, RESULTS: 2 }
 
@@ -16,6 +16,7 @@ export default function App() {
   const [emailCols, setEmailCols] = useState([])
   const [cpCols, setCPCols] = useState([])
   const [results, setResults] = useState([])
+  const [dupRemoved, setDupRemoved] = useState(0)
 
   const handleFile = (file) => {
     setFileName(file.name)
@@ -45,7 +46,9 @@ export default function App() {
       cpCols.forEach((ci) => { cpInfo[ci] = getContactFromCP(row[ci]) })
       return { original: row, cleanedRow, emailResults, cpInfo }
     })
-    setResults(cleaned)
+    const { deduped, duplicatesRemoved } = deduplicateRows(cleaned, emailCols)
+    setResults(deduped)
+    setDupRemoved(duplicatesRemoved)
     setStep(STEPS.RESULTS)
   }
 
@@ -104,9 +107,16 @@ export default function App() {
             </span>
             <button onClick={() => setStep(STEPS.CONFIG)} style={secondaryBtn}>← Modifier les colonnes</button>
           </div>
-          <ResultsTable headers={headers} rows={results} emailCols={emailCols} cpCols={cpCols} onDownload={downloadResult} />
-        </div>
-      )}
+            <ResultsTable
+                headers={headers}
+                rows={results}
+                emailCols={emailCols}
+                cpCols={cpCols}
+                dupRemoved={dupRemoved}
+                onDownload={downloadResult}
+              />        
+          </div>
+        )}
     </div>
   )
 }
