@@ -15,19 +15,19 @@ export default function App() {
   const [rawRows, setRawRows] = useState([])
   const [emailCols, setEmailCols] = useState([])
   const [cpCols, setCPCols] = useState([])
+  const [addDept, setAddDept] = useState(true) // ← option activable/désactivable
   const [results, setResults] = useState([])
   const [dupRemoved, setDupRemoved] = useState(0)
 
   const handleFile = (file) => {
     setFileName(file.name)
-    const isCSV = file.name.toLowerCase().endsWith('.csv')
+    const name = file.name.toLowerCase()
+    const isCSV = name.endsWith('.csv')
     const reader = new FileReader()
 
     if (isCSV) {
-      // Lire en binaire pour détecter et convertir l'encodage correctement
       reader.onload = (e) => {
-        const buffer = e.target.result
-        const text = decodeBuffer(buffer)
+        const text = decodeBuffer(e.target.result)
         const rows = parseCSV(text)
         const hdrs = rows[0] || []
         setHeaders(hdrs)
@@ -38,7 +38,6 @@ export default function App() {
       }
       reader.readAsArrayBuffer(file)
     } else {
-      // XLSX : XLSX.read gère lui-même l'encodage
       reader.onload = (e) => {
         const wb = XLSX.read(e.target.result, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
@@ -60,8 +59,11 @@ export default function App() {
       emailCols.forEach((ci) => { emailResults[ci] = cleanEmail(row[ci]) })
       const cleanedRow = [...row]
       emailCols.forEach((ci) => { if (emailResults[ci].cleaned) cleanedRow[ci] = emailResults[ci].cleaned })
+
       const cpInfo = {}
-      cpCols.forEach((ci) => { cpInfo[ci] = getContactFromCP(row[ci]) })
+      if (addDept) {
+        cpCols.forEach((ci) => { cpInfo[ci] = getContactFromCP(row[ci]) })
+      }
       return { original: row, cleanedRow, emailResults, cpInfo }
     })
     const { deduped, duplicatesRemoved } = deduplicateRows(cleaned, emailCols)
@@ -71,14 +73,15 @@ export default function App() {
   }
 
   const downloadResult = () => {
-    const extraHeaders = cpCols.flatMap(() => [
+    const activeCpCols = addDept ? cpCols : []
+    const extraHeaders = activeCpCols.flatMap(() => [
       'Codes_départements',
       'Départements',
       'Directions territoriales',
     ])
     const outputHeaders = [...headers, ...extraHeaders]
     const outputRows = results.map((r) => {
-      const extra = cpCols.flatMap((ci) => {
+      const extra = activeCpCols.flatMap((ci) => {
         const info = r.cpInfo?.[ci] || {}
         return [info.dept || '', info.departement || '', info.dt || '']
       })
@@ -105,13 +108,30 @@ export default function App() {
             <span style={{ fontSize: 13, color: '#888' }}>{rawRows.length} lignes · {headers.length} colonnes</span>
             <button onClick={() => setStep(STEPS.UPLOAD)} style={secondaryBtn}>← Changer de fichier</button>
           </div>
+
           <ColumnSelector headers={headers} selected={emailCols} onChange={setEmailCols}
             label="Colonnes d'emails à nettoyer" color="#185FA5" />
-          <ColumnSelector headers={headers} selected={cpCols} onChange={setCPCols}
-            label="Colonnes de codes postaux (département)" color="#E65100" />
+
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14 }}>
+              <input
+                type="checkbox"
+                checked={addDept}
+                onChange={(e) => setAddDept(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer' }}
+              />
+              Ajouter département / direction territoriale à partir du code postal
+            </label>
+          </div>
+
+          {addDept && (
+            <ColumnSelector headers={headers} selected={cpCols} onChange={setCPCols}
+              label="Colonnes de codes postaux" color="#E65100" />
+          )}
+
           <button onClick={runClean}
-            disabled={!emailCols.length && !cpCols.length}
-            style={{ ...primaryBtn, opacity: (!emailCols.length && !cpCols.length) ? 0.5 : 1 }}>
+            disabled={!emailCols.length && !(addDept && cpCols.length)}
+            style={{ ...primaryBtn, opacity: (!emailCols.length && !(addDept && cpCols.length)) ? 0.5 : 1 }}>
             Nettoyer
           </button>
         </div>
@@ -129,7 +149,7 @@ export default function App() {
             headers={headers}
             rows={results}
             emailCols={emailCols}
-            cpCols={cpCols}
+            cpCols={addDept ? cpCols : []}
             dupRemoved={dupRemoved}
             onDownload={downloadResult}
           />

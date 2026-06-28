@@ -5,10 +5,12 @@ export default function DropZone({ onFile }) {
   const [dragging, setDragging] = useState(false)
 
   const handle = (file) => {
-    if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+    if (!file) return
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv')) {
       onFile(file)
     } else {
-      alert('Merci de déposer un fichier .xlsx')
+      alert('Merci de déposer un fichier .xlsx, .xls ou .csv')
     }
   }
 
@@ -31,13 +33,13 @@ export default function DropZone({ onFile }) {
       <input
         ref={inputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.csv"
         style={{ display: 'none' }}
         onChange={(e) => handle(e.target.files[0])}
       />
       <div style={{ fontSize: 40, marginBottom: 12 }}>📂</div>
-      <p style={{ margin: 0, fontWeight: 500 }}>Dépose ton fichier Excel ici</p>
-      <p style={{ margin: '6px 0 0', fontSize: 13, color: '#888' }}>ou clique pour choisir (.xlsx)</p>
+      <p style={{ margin: 0, fontWeight: 500 }}>Dépose ton fichier ici</p>
+      <p style={{ margin: '6px 0 0', fontSize: 13, color: '#888' }}>ou clique pour choisir (.xlsx, .xls ou .csv)</p>
     </div>
   )
 }
