@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 const BADGE = {
   ok:      { bg: '#EAF3DE', color: '#3B6D11' },
@@ -10,17 +10,16 @@ const BADGE = {
 function Badge({ status, children }) {
   const s = BADGE[status] || BADGE.empty
   return (
-    <span style={{
-      background: s.bg, color: s.color,
-      borderRadius: 6, padding: '2px 8px', fontSize: 12, fontWeight: 500,
-    }}>
+    <span style={{ background: s.bg, color: s.color, borderRadius: 6, padding: '2px 8px', fontSize: 12, fontWeight: 500 }}>
       {children}
     </span>
   )
 }
 
-export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownload }) {
+export default function ResultsTable({ headers, rows, emailCols, cpCols, dupRemoved, onDownload, onReset }) {
   const [filter, setFilter] = useState('all')
+  const [dragging, setDragging] = useState(false)
+  const inputRef = useRef()
   const PAGE = 200
 
   const counts = { ok: 0, fixed: 0, invalid: 0 }
@@ -37,23 +36,20 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
   }).slice(0, PAGE)
 
   const extraHeaders = cpCols.flatMap((ci) => [
-    `Codes_Départements`,
-    `Départements`,
-    `Directions territoriales`,
+    `Code dept. (${headers[ci] || 'CP'})`,
+    `Département (${headers[ci] || 'CP'})`,
+    `Direction territoriale (${headers[ci] || 'CP'})`,
   ])
 
   const filterBtn = (f, label, count, color) => (
-    <button
-      onClick={() => setFilter(f)}
-      style={{
-        padding: '6px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-        border: `1px solid ${filter === f ? color : '#ccc'}`,
-        background: filter === f ? color : '#fff',
-        color: filter === f ? '#fff' : '#333',
-        fontWeight: filter === f ? 500 : 400,
-      }}
-    >
-      {label} {count !== undefined && (
+    <button onClick={() => setFilter(f)} style={{
+      padding: '6px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+      border: `1px solid ${filter === f ? color : '#ccc'}`,
+      background: filter === f ? color : '#fff',
+      color: filter === f ? '#fff' : '#333',
+      fontWeight: filter === f ? 500 : 400,
+    }}>
+      {label}{count !== undefined && (
         <span style={{
           background: filter === f ? 'rgba(255,255,255,0.25)' : BADGE[f]?.bg,
           color: filter === f ? '#fff' : BADGE[f]?.color,
@@ -62,6 +58,14 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
       )}
     </button>
   )
+
+  const handleDrop = (file) => {
+    if (file && onReset) {
+      // On reset proprement puis on laisse App gérer le nouveau fichier
+      // via la prop onReset qui est en fait le reset + handleFile
+      onReset(file)
+    }
+  }
 
   return (
     <div>
@@ -72,6 +76,7 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
           { label: 'Emails OK', val: counts.ok, color: '#3B6D11' },
           { label: 'Corrigés', val: counts.fixed, color: '#854F0B' },
           { label: 'Invalides', val: counts.invalid, color: '#A32D2D' },
+          { label: 'Doublons supprimés', val: dupRemoved, color: '#6B21A8' },
         ].map(({ label, val, color }) => (
           <div key={label} style={{ background: '#f5f5f5', borderRadius: 8, padding: '0.75rem 1rem' }}>
             <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{label}</div>
@@ -80,7 +85,7 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
         ))}
       </div>
 
-      {/* Filtres + bouton download */}
+      {/* Filtres + download */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {filterBtn('all', 'Tout', undefined, '#555')}
@@ -88,20 +93,16 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
           {filterBtn('invalid', 'Invalides', counts.invalid, '#A32D2D')}
           {filterBtn('ok', 'OK', counts.ok, '#3B6D11')}
         </div>
-        <button
-          onClick={onDownload}
-          style={{
-            padding: '8px 18px', borderRadius: 8, fontSize: 14,
-            background: '#185FA5', color: '#fff', border: 'none', cursor: 'pointer',
-            fontWeight: 500,
-          }}
-        >
+        <button onClick={onDownload} style={{
+          padding: '8px 18px', borderRadius: 8, fontSize: 14,
+          background: '#185FA5', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 500,
+        }}>
           ⬇ Télécharger le fichier nettoyé
         </button>
       </div>
 
       {/* Table */}
-      <div style={{ overflowX: 'auto', maxHeight: 380, overflowY: 'auto', border: '1px solid #e5e5e5', borderRadius: 8 }}>
+      <div style={{ overflowX: 'auto', maxHeight: 360, overflowY: 'auto', border: '1px solid #e5e5e5', borderRadius: 8, marginBottom: '1.5rem' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: '#fafafa', position: 'sticky', top: 0, zIndex: 1 }}>
@@ -109,8 +110,8 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
               {headers.map((h, i) => (
                 <th key={i} style={th}>
                   {h || `Col ${i + 1}`}
-                  {emailCols.includes(i) && <span style={{ marginLeft: 4, ...tagStyle('#E6F1FB','#185FA5') }}>email</span>}
-                  {cpCols.includes(i) && <span style={{ marginLeft: 4, ...tagStyle('#FFF3E0','#E65100') }}>CP</span>}
+                  {emailCols.includes(i) && <span style={{ marginLeft: 4, ...tag('#E6F1FB','#185FA5') }}>email</span>}
+                  {cpCols.includes(i) && <span style={{ marginLeft: 4, ...tag('#FFF3E0','#E65100') }}>CP</span>}
                 </th>
               ))}
               {extraHeaders.map((h) => (
@@ -130,8 +131,7 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
                     if (res.status === 'fixed') return (
                       <td key={ci} style={td()}>
                         <span style={{ textDecoration: 'line-through', color: '#bbb', fontSize: 11, marginRight: 4 }}>{res.original}</span>
-                        →&nbsp;
-                        <Badge status="fixed">{res.cleaned}</Badge>
+                        →&nbsp;<Badge status="fixed">{res.cleaned}</Badge>
                       </td>
                     )
                     if (res.status === 'invalid') return (
@@ -144,20 +144,19 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
                   return <td key={ci} style={td()}>{r.original[ci] ?? ''}</td>
                 })}
                 {cpCols.flatMap((ci) => {
-                const info = r.cpInfo?.[ci] || {}
-                return [
-                  <td key={`dept-${ci}`}>{info.dept || '—'}</td>,
-                  <td key={`departement-${ci}`}>{info.departement || '—'}</td>,
-                  <td key={`dt-${ci}`} style={{ color: info.dt ? '#185FA5' : '#bbb' }}>
-                    {info.dt || '—'}
-                  </td>,
-                ]
-              })}
+                  const info = r.cpInfo?.[ci] || {}
+                  return [
+                    <td key={`dept-${ci}`} style={td()}>{info.dept || <span style={{ color: '#bbb' }}>—</span>}</td>,
+                    <td key={`dep-${ci}`} style={td()}>{info.departement || <span style={{ color: '#bbb' }}>—</span>}</td>,
+                    <td key={`dt-${ci}`} style={{ ...td(), color: info.dt ? '#185FA5' : '#bbb' }}>{info.dt || '—'}</td>,
+                  ]
+                })}
               </tr>
             ))}
             {rows.length > PAGE && (
               <tr>
-                <td colSpan={headers.length + extraHeaders.length + 1} style={{ textAlign: 'center', padding: 12, color: '#aaa', fontSize: 13 }}>
+                <td colSpan={headers.length + extraHeaders.length + 1}
+                  style={{ textAlign: 'center', padding: 12, color: '#aaa', fontSize: 13 }}>
                   … et {rows.length - PAGE} lignes de plus dans le fichier téléchargé
                 </td>
               </tr>
@@ -165,10 +164,32 @@ export default function ResultsTable({ headers, rows, emailCols, cpCols, onDownl
           </tbody>
         </table>
       </div>
+
+      {/* Zone dépôt nouveau fichier */}
+      <div
+        onClick={() => inputRef.current.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault(); setDragging(false)
+          const file = e.dataTransfer.files[0]
+          if (file) onReset(file)
+        }}
+        style={{
+          border: `2px dashed ${dragging ? '#378ADD' : '#ddd'}`,
+          borderRadius: 10, padding: '1.25rem 1rem', textAlign: 'center',
+          cursor: 'pointer', background: dragging ? '#eaf4fd' : '#fafafa',
+          transition: 'all 0.15s', fontSize: 13, color: '#999',
+        }}
+      >
+        <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+          onChange={(e) => { if (e.target.files[0]) onReset(e.target.files[0]) }} />
+        🔄 Déposer ou choisir un nouveau fichier pour recommencer
+      </div>
     </div>
   )
 }
 
 const th = { padding: '8px 10px', fontWeight: 500, fontSize: 12, color: '#666', textAlign: 'left', borderBottom: '1px solid #e5e5e5', whiteSpace: 'nowrap' }
 const td = (muted = false) => ({ padding: '6px 10px', color: muted ? '#aaa' : 'inherit', whiteSpace: 'nowrap' })
-const tagStyle = (bg, color) => ({ background: bg, color, borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 500 })
+const tag = (bg, color) => ({ background: bg, color, borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 500 })

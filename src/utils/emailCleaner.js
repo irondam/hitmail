@@ -4,7 +4,6 @@ const TYPO_DOMAINS = {
   'gnail.com':'gmail.com','gmai.com':'gmail.com','gamil.com':'gmail.com',
   'gmial.com':'gmail.com','gmail.fr':'gmail.com','gmal.com':'gmail.com',
   'homail.com':'hotmail.com','hotmai.com':'hotmail.com','hotmial.com':'hotmail.com',
-  // hotmail.fr supprimé : domaine valide
   'hotmaill.com':'hotmail.com',
   'yaho.com':'yahoo.com','yaho.fr':'yahoo.fr','yahooo.com':'yahoo.com',
   'yhoo.com':'yahoo.com','yahoo.com.fr':'yahoo.fr',
@@ -32,15 +31,57 @@ const HTML_ENTITIES = {
 
 const PARASITIC_PREFIXES = ['mailto:','MAILTO:','smtp:','SMTP:','mail:','MAIL:'];
 
+// Caractères interdits dans une adresse email (hors local-part et domaine)
+// On retire tout ce qui n'est pas alphanum, @, ., -, _, +, ~
+// mais on le fait chirurgicalement APRÈS les corrections ciblées
+const INVALID_CHARS_RE = /[^\w.@+\-~]/g;
+
+// ─── Séparation multi-emails dans une cellule ────────────────────────────────
+
+/**
+ * Détecte si une cellule contient plusieurs emails et les sépare.
+ * Séparateurs : espace, ; , \n \r (après nettoyage préliminaire)
+ * Retourne un tableau de strings brutes (une par email potentiel).
+ */
+export function splitMultipleEmails(raw) {
+  if (raw === null || raw === undefined || raw === '') return [''];
+  let s = String(raw);
+
+  // Si le contenu ressemble à un seul email (pas de séparateur évident), retourne tel quel
+  // On sépare sur : retour à la ligne, point-virgule, et espaces/virgules ENTRE deux segments
+  // contenant chacun un @
+  const hasMultiple = (s.match(/@/g) || []).length > 1;
+  if (!hasMultiple) return [s];
+
+  // Sépare sur \n, \r, ;
+  // Pour les virgules et espaces : on les utilise comme séparateurs seulement si
+  // le résultat contient un @, pour ne pas casser les virgules dans un domaine
+  const parts = s
+    .split(/[\r\n;]+/)
+    .flatMap(p => {
+      // Si ce fragment contient plusieurs @, on tente de séparer sur espace ou virgule
+      if ((p.match(/@/g) || []).length > 1) {
+        return p.split(/[\s,]+/);
+      }
+      return [p];
+    })
+    .map(p => p.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [s];
+}
+
 // ─── Nettoyage d'un email ────────────────────────────────────────────────────
 
 export function cleanEmail(raw) {
   if (raw === null || raw === undefined || raw === '') return { cleaned: '', status: 'empty' };
 
-  let email = String(raw);
+  let email = String(raw).trim();
 
-  // 1. Retours à la ligne → premier segment non vide
-  email = email.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean)[0] || '';
+  // 1. [at] / [AT] / (at) → @
+  email = email.replace(/\s*\[at\]\s*/gi, '@');
+  email = email.replace(/\s*\(at\)\s*/gi, '@');
+  email = email.replace(/\s*\{at\}\s*/gi, '@');
 
   // 2. Entités HTML nommées
   for (const [entity, char] of Object.entries(HTML_ENTITIES)) {
@@ -51,7 +92,6 @@ export function cleanEmail(raw) {
 
   // 3. Caractères invisibles et espaces insécables
   email = email.replace(/[\u00A0\u200B\u200C\u200D\u200E\u200F\u2060\uFEFF]/g, '');
-  email = email.replace(/\s+/g, '');
 
   // 4. Guillemets typographiques enveloppants
   email = email.replace(/^[«»„\u201C\u201D\u2018\u2019\u2039\u203A"'`]+/, '');
@@ -62,7 +102,25 @@ export function cleanEmail(raw) {
     if (email.toLowerCase().startsWith(prefix.toLowerCase())) { email = email.slice(prefix.length); break; }
   }
 
-  // 6. Punycode → unicode
+  // 6. Suppression de tous les espaces (internes compris)
+  email = email.replace(/\s+/g, '');
+
+  // 7. Minuscules
+  email = email.toLowerCase();
+
+  // 8. Virgules dans la partie locale ou domaine → point
+  //    (on le fait avant le split @ pour traiter le cas foo,bar@domain,com)
+  //    Attention : les virgules comme séparateur multi-emails ont déjà été gérées
+  //    par splitMultipleEmails() en amont. Ici il ne reste qu'un seul email.
+  email = email.replace(/,/g, '.');
+
+  // 9. Nettoyage des caractères spéciaux non autorisés
+  //    On préserve : lettres, chiffres, . @ - _ + ~ (valides en local-part/domaine)
+  //    On supprime : ! ? # $ % ^ & * ( ) = [ ] { } | \ / < > ' " ` ; : , (déjà traité)
+  //    On fait ça AVANT le split @ pour éviter de corrompre la structure
+  email = email.replace(/[!?#$%^&*()=\[\]{}|\\/<>'"`;:]/g, '');
+
+  // 10. Punycode → unicode
   if (email.includes('xn--')) {
     try {
       const [local, domain] = email.split('@');
@@ -70,24 +128,50 @@ export function cleanEmail(raw) {
     } catch (_) {}
   }
 
-  // 7. Minuscules + nettoyage final
-  email = email.toLowerCase().replace(/[,;]+$/, '');
+  // 11. Nettoyage final (ponctuation résiduelle)
+  email = email.replace(/[,;]+$/, '').replace(/\.+$/, '');
 
   const original = email;
   if (!email) return { cleaned: '', status: 'empty' };
-  if (!email.includes('@')) return { cleaned: email, status: 'invalid', reason: 'pas de @' };
 
+  // 12. Validation structure @
+  if (!email.includes('@')) return { cleaned: email, status: 'invalid', reason: 'pas de @' };
   const parts = email.split('@');
   if (parts.length !== 2 || !parts[1]) return { cleaned: email, status: 'invalid', reason: 'format @ invalide' };
 
   let [local, domain] = parts;
+  if (!local) return { cleaned: email, status: 'invalid', reason: 'local vide' };
 
+  // 13. Correction domaine connu
   if (TYPO_DOMAINS[domain]) { domain = TYPO_DOMAINS[domain]; email = `${local}@${domain}`; }
 
+  // 14. Correction TLD
   for (const [bad, good] of Object.entries(TLD_TYPOS)) {
     if (domain.endsWith(bad)) { domain = domain.slice(0, -bad.length) + good; email = `${local}@${domain}`; break; }
   }
 
+  // 15. Domaines académiques (ac-xxx) : s'assurer qu'ils finissent en .fr
+  //     ex: ac-poitiers → ac-poitiers.fr, ac-poitiers.edu → ac-poitiers.fr
+  if (/^ac-/.test(domain) && !domain.endsWith('.fr')) {
+    // Retire une éventuelle extension non-.fr et remplace par .fr
+    domain = domain.replace(/\.[^.]+$/, '') + '.fr';
+    // Si pas d'extension du tout, ajoute juste .fr
+    if (!domain.includes('.')) domain = domain + '.fr';
+    email = `${local}@${domain}`;
+  }
+
+  // 16. "fr" en fin de domaine sans point avant → ajouter le point
+  //     ex: hotmailfr → hotmail.fr  /  gmailfr → gmail.fr
+  if (/[a-z]fr$/.test(domain) && !domain.endsWith('.fr')) {
+    domain = domain.replace(/fr$/, '.fr');
+    email = `${local}@${domain}`;
+  }
+
+  // 17. Points multiples consécutifs dans le domaine → un seul
+  domain = domain.replace(/\.{2,}/g, '.');
+  email = `${local}@${domain}`;
+
+  // 18. Validation finale
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     return { cleaned: email, status: 'invalid', reason: 'format invalide' };
   }
@@ -151,6 +235,17 @@ export function parseCSV(text) {
   return rows;
 }
 
+// ─── Détection d'encodage et décodage ───────────────────────────────────────
+
+export function decodeBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return new TextDecoder('utf-8').decode(buffer);
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(buffer);
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(buffer);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buffer); } catch (_) {}
+  return new TextDecoder('windows-1252').decode(buffer);
+}
+
 // ─── Déduplication ───────────────────────────────────────────────────────────
 
 export function deduplicateRows(cleanedRows, emailCols) {
@@ -167,50 +262,5 @@ export function deduplicateRows(cleanedRows, emailCols) {
       deduped.push(row);
     }
   }
-
   return { deduped, duplicatesRemoved };
-}
-
-// ─── Détection d'encodage et décodage ───────────────────────────────────────
-
-/**
- * Prend un ArrayBuffer (fichier CSV lu en binaire) et retourne une string UTF-8.
- * Détection dans l'ordre :
- *   1. BOM UTF-8 (EF BB BF) → UTF-8
- *   2. BOM UTF-16 LE/BE     → UTF-16
- *   3. Heuristique : si le buffer contient des séquences UTF-8 valides → UTF-8
- *   4. Sinon → Windows-1252 (encodage par défaut des exports Excel FR/EU)
- *
- * Windows-1252 est préféré à ISO-8859-1 car il couvre en plus :
- *   €, guillemets typographiques " " ' ', tirets –, —, etc.
- */
-export function decodeBuffer(buffer) {
-  const bytes = new Uint8Array(buffer)
-
-  // 1. BOM UTF-8
-  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
-    return new TextDecoder('utf-8').decode(buffer)
-  }
-
-  // 2. BOM UTF-16 LE
-  if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
-    return new TextDecoder('utf-16le').decode(buffer)
-  }
-
-  // 3. BOM UTF-16 BE
-  if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
-    return new TextDecoder('utf-16be').decode(buffer)
-  }
-
-  // 4. Heuristique UTF-8 : on tente de décoder et on vérifie l'absence d'erreurs
-  //    TextDecoder en mode fatal lève une exception si le buffer n'est pas UTF-8 valide
-  try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer)
-    return text
-  } catch (_) {
-    // Pas du UTF-8 valide → on tombe sur Windows-1252
-  }
-
-  // 5. Windows-1252 (couvre ISO-8859-1 + caractères typographiques FR courants)
-  return new TextDecoder('windows-1252').decode(buffer)
 }
