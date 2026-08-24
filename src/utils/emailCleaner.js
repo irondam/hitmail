@@ -51,13 +51,14 @@ export function splitMultipleEmails(raw) {
   // On sépare sur : retour à la ligne, point-virgule, et espaces/virgules ENTRE deux segments
   // contenant chacun un @
   const hasMultiple = (s.match(/@/g) || []).length > 1;
-  if (!hasMultiple) return [s];
+  // / et ; sont des séparateurs certains même avec un seul @
+  const hasCertainSep = /[\/;]/.test(s);
+  if (!hasMultiple && !hasCertainSep) return [s];
 
-  // Sépare sur \n, \r, ;
-  // Pour les virgules et espaces : on les utilise comme séparateurs seulement si
-  // le résultat contient un @, pour ne pas casser les virgules dans un domaine
+  // Sépare sur \n, \r, ; et /  (séparateurs certains)
+  // Pour les virgules et espaces : seulement si plusieurs @ détectés
   const parts = s
-    .split(/[\r\n;]+/)
+    .split(/[\r\n;\/]+/)
     .flatMap(p => {
       // Si ce fragment contient plusieurs @, on tente de séparer sur espace ou virgule
       if ((p.match(/@/g) || []).length > 1) {
@@ -164,6 +165,13 @@ export function cleanEmail(raw) {
   //     ex: hotmailfr → hotmail.fr  /  gmailfr → gmail.fr
   if (/[a-z]fr$/.test(domain) && !domain.endsWith('.fr')) {
     domain = domain.replace(/fr$/, '.fr');
+    email = `${local}@${domain}`;
+  }
+
+  // 16b. ".f" seul en fin de domaine → ".fr"
+  //      ex: machin@gmail.f → machin@gmail.fr
+  if (domain.endsWith('.f')) {
+    domain = domain.slice(0, -2) + '.fr';
     email = `${local}@${domain}`;
   }
 
